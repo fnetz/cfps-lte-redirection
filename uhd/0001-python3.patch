@@ -1,0 +1,343 @@
+diff --git a/host/CMakeLists.txt b/host/CMakeLists.txt
+index 13e65b6ab..fe618eeb1 100644
+--- a/host/CMakeLists.txt
++++ b/host/CMakeLists.txt
+@@ -10,7 +10,7 @@
+ ########################################################################
+ # NOTE! If you change the version in the following line, also change
+ # CMAKE_MIN_VERSION below. (This won't take a variable).
+-cmake_minimum_required(VERSION 3.5.1)
++cmake_minimum_required(VERSION 3.8)
+ if(POLICY CMP0048)
+   cmake_policy(SET CMP0048 NEW) # Suppress Version warnings
+ endif(POLICY CMP0048)
+@@ -23,20 +23,20 @@ list(INSERT CMAKE_MODULE_PATH 0 ${UHD_SOURCE_DIR}/cmake/Modules)
+ ########################################################################
+ # UHD Dependency Minimum Versions
+ ########################################################################
+-set(CMAKE_MIN_VERSION "3.5.1")
+-set(GCC_MIN_VERSION "4.8.0")
+-set(CLANG_MIN_VERSION "3.4.0")
+-set(APPLECLANG_MIN_VERSION "503")
++set(CMAKE_MIN_VERSION "3.8")
++set(GCC_MIN_VERSION "6.3.0")
++set(CLANG_MIN_VERSION "6.0.0")
++set(APPLECLANG_MIN_VERSION "800")
+ # Make sure to update the next two in unison:
+-set(MSVC_MIN_VERSION "1900")
+-set(MSVC_MIN_VERSION_READABLE "14.0")
++set(MSVC_MIN_VERSION "1910")
++set(MSVC_MIN_VERSION_READABLE "15.0")
+ # This Python version gets used for Python API (if requested) as well as
+ # all the build-time Python scripts
+-set(PYTHON_MIN_VERSION "2.7")
+-set(PYTHON3_MIN_VERSION "3.5")
++set(PYTHON_MIN_VERSION "3.6")
+ # Other deps
+-set(BOOST_MIN_VERSION "1.58")
+-set(NUMPY_MIN_VERSION "1.7")
++set(SETUPTOOLS_MIN_VERSION "40.0")
++set(BOOST_MIN_VERSION "1.65")
++set(NUMPY_MIN_VERSION "1.11")
+ set(PY_MAKO_MIN_VERSION "0.4.2")
+ set(PY_REQUESTS_MIN_VERSION "2.0")
+ 
+@@ -311,27 +311,35 @@ include(UHDLog)
+ ########################################################################
+ include(UHDPython)
+ 
+-PYTHON_CHECK_MODULE(
+-    "Python version ${PYTHON_MIN_VERSION} or greater"
+-    "platform" "platform.python_version() >= '${PYTHON_MIN_VERSION}'"
++PYTHON_CHECK_MODULE_VERSION(
++    "compatible Python version"
++    "platform"
++    "platform.python_version()"
++    ${PYTHON_MIN_VERSION}
+     HAVE_PYTHON_PLAT_MIN_VERSION
+ )
+ 
+-PYTHON_CHECK_MODULE(
+-    "Mako templates ${PY_MAKO_MIN_VERSION} or greater"
+-    "mako" "mako.__version__ >= '${PY_MAKO_MIN_VERSION}'"
++PYTHON_CHECK_MODULE_VERSION(
++    "Mako templates module"
++    "mako"
++    "mako.__version__"
++    ${PY_MAKO_MIN_VERSION}
+     HAVE_PYTHON_MODULE_MAKO
+ )
+ 
+-PYTHON_CHECK_MODULE(
+-    "requests ${PY_REQUESTS_MIN_VERSION} or greater"
+-    "requests" "requests.__version__ >= '${PY_REQUESTS_MIN_VERSION}'"
++PYTHON_CHECK_MODULE_VERSION(
++    "requests module"
++    "requests"
++    "requests.__version__"
++    ${PY_REQUESTS_MIN_VERSION}
+     HAVE_PYTHON_MODULE_REQUESTS
+ )
+ 
+-PYTHON_CHECK_MODULE(
+-    "numpy ${NUMPY_MIN_VERSION} or greater"
+-    "numpy" "LooseVersion(numpy.__version__) >= LooseVersion('${NUMPY_MIN_VERSION}')"
++PYTHON_CHECK_MODULE_VERSION(
++    "numpy module"
++    "numpy"
++    "numpy.__version__"
++    ${NUMPY_MIN_VERSION}
+     HAVE_PYTHON_MODULE_NUMPY
+ )
+ 
+@@ -360,7 +368,7 @@ UHD_INSTALL(FILES
+ ########################################################################
+ # Register top level components
+ ########################################################################
+-LIBUHD_REGISTER_COMPONENT("LibUHD" ENABLE_LIBUHD ON "Boost_FOUND;HAVE_PYTHON_PLAT_MIN_VERSION;HAVE_PYTHON_MODULE_MAKO" OFF ON)
++LIBUHD_REGISTER_COMPONENT("LibUHD" ENABLE_LIBUHD ON "Boost_FOUND;HAVE_PYTHON_MODULE_MAKO" OFF ON)
+ LIBUHD_REGISTER_COMPONENT("LibUHD - C API" ENABLE_C_API ON "ENABLE_LIBUHD" OFF OFF)
+ if(WIN32)
+   LIBUHD_REGISTER_COMPONENT("LibUHD - Python API" ENABLE_PYTHON_API OFF "ENABLE_LIBUHD;HAVE_PYTHON_MODULE_NUMPY;HAVE_PYTHON_LIBS" OFF OFF)
+diff --git a/host/cmake/Modules/UHDPython.cmake b/host/cmake/Modules/UHDPython.cmake
+index a93761131..d9e792bcc 100644
+--- a/host/cmake/Modules/UHDPython.cmake
++++ b/host/cmake/Modules/UHDPython.cmake
+@@ -19,12 +19,9 @@ if(PYTHON_EXECUTABLE)
+     set(PYTHONINTERP_FOUND TRUE)
+ endif(PYTHON_EXECUTABLE)
+ 
+-# We always try to find Py3k first. Once we only support Py3k we can remove
+-# most of this.
+ if(NOT PYTHONINTERP_FOUND)
+-    find_package(Python3 ${PYTHON3_MIN_VERSION} QUIET)
++    find_package(Python3 ${PYTHON_MIN_VERSION} QUIET)
+     if(Python3_Interpreter_FOUND)
+-        set(PYTHON_MIN_VERSION ${PYTHON3_MIN_VERSION})
+         set(PYTHON_VERSION ${Python3_VERSION})
+         set(PYTHON_EXECUTABLE ${Python3_EXECUTABLE})
+         set(PYTHONINTERP_FOUND TRUE)
+@@ -32,41 +29,16 @@ if(NOT PYTHONINTERP_FOUND)
+ endif(NOT PYTHONINTERP_FOUND)
+ 
+ if(NOT PYTHONINTERP_FOUND)
+-    find_package(PythonInterp ${PYTHON3_MIN_VERSION} QUIET)
++    find_package(PythonInterp ${PYTHON_MIN_VERSION} QUIET)
+     if(PYTHONINTERP_FOUND)
+-        set(PYTHON_MIN_VERSION ${PYTHON3_MIN_VERSION})
+         set(PYTHON_VERSION ${PYTHON_VERSION_STRING})
+     endif(PYTHONINTERP_FOUND)
+ endif(NOT PYTHONINTERP_FOUND)
+ 
+-# Next, try and find Py2k.
+-if(NOT PYTHONINTERP_FOUND)
+-    find_package(Python2 ${PYTHON_MIN_VERSION} QUIET)
+-    if(Python2_Interpreter_FOUND)
+-        set(PYTHON_VERSION ${Python2_VERSION})
+-        set(PYTHON_EXECUTABLE ${Python2_EXECUTABLE})
+-        set(PYTHONINTERP_FOUND TRUE)
+-    endif(Python2_Interpreter_FOUND)
+-endif(NOT PYTHONINTERP_FOUND)
+-
+-if(NOT PYTHONINTERP_FOUND)
+-    find_package(PythonInterp ${PYTHON_MIN_VERSION} QUIET)
+-    set(PYTHON_VERSION ${PYTHON_VERSION_STRING})
+-endif(NOT PYTHONINTERP_FOUND)
+-
+ # If that fails, try using the build-in find program routine.
+ if(NOT PYTHONINTERP_FOUND)
+     message(STATUS "Attempting to find Python without CMake...")
+-    find_program(PYTHON_EXECUTABLE NAMES python3 python3.5 python3.6 python3.7 python3.8)
+-    if(PYTHON_EXECUTABLE)
+-        set(PYTHONINTERP_FOUND TRUE)
+-        set(PYTHON_MIN_VERSION ${PYTHON3_MIN_VERSION})
+-    endif(PYTHON_EXECUTABLE)
+-endif(NOT PYTHONINTERP_FOUND)
+-
+-if(NOT PYTHONINTERP_FOUND)
+-    message(STATUS "Attempting to find Python without CMake...")
+-    find_program(PYTHON_EXECUTABLE NAMES python2 python2.7)
++    find_program(PYTHON_EXECUTABLE NAMES python3 python3.6 python3.7 python3.8 python3.9)
+     if(PYTHON_EXECUTABLE)
+         set(PYTHONINTERP_FOUND TRUE)
+     endif(PYTHON_EXECUTABLE)
+@@ -127,36 +99,116 @@ set(RUNTIME_PYTHON_EXECUTABLE ${RUNTIME_PYTHON_EXECUTABLE} CACHE FILEPATH
+ message(STATUS "Python runtime interpreter: ${RUNTIME_PYTHON_EXECUTABLE} Version: ${RUNTIME_PYTHON_VERSION}")
+ message(STATUS "Override with: -DRUNTIME_PYTHON_EXECUTABLE=<path-to-python>")
+ 
+-macro(PYTHON_CHECK_MODULE desc mod cmd have)
++###############################################################################
++# Determine if a Python module is installed, or, more generally, determine
++# if some condition that Python can report through a Boolean expression is
++# met. This macro allows one or more modules to be imported and a Python
++# Boolean expression to be evaluated.
++#
++# - desc:
++#    Description of what's being checked (for user feedback)
++# - module:
++#    The module(s) to be passed to the `import` command
++# - bool_expr:
++#    A Python expression to be evaluated that returns True or False based on
++#    the presence or absence of the module (or in the general case, the
++#    condition being checked)
++# - have_ver:
++#    The variable name to be set to TRUE if the Python expression returns True,
++#    or FALSE otherwise
++macro(PYTHON_CHECK_MODULE desc module bool_expr have_var)
+     message(STATUS "")
+     message(STATUS "Python checking for ${desc}")
+     execute_process(
+         COMMAND ${PYTHON_EXECUTABLE} -c "
+ #########################################
+-from distutils.version import LooseVersion
+-try: import ${mod}
+-except: exit(1)
+-try: assert ${cmd}
+-except: exit(2)
++try:
++    import ${module}
++except:
++    exit(1)
++try:
++    assert ${bool_expr}
++except:
++    exit(2)
+ exit(0)
+ #########################################"
+-        RESULT_VARIABLE ${have}
++        RESULT_VARIABLE python_result
+     )
+-    if(${have} EQUAL 0)
++    if(python_result EQUAL 0)
+         message(STATUS "Python checking for ${desc} - found")
+-        set(${have} TRUE)
+-    elseif(${have} EQUAL 1)
+-        message(STATUS "Python checking for ${desc} - \"import ${mod}\" failed")
+-        set(${have} FALSE)
+-    elseif(${have} EQUAL 2)
+-        message(STATUS "Python checking for ${desc} - \"assert ${cmd}\" failed")
+-        set(${have} FALSE)
++        set(${have_var} TRUE)
++    elseif(python_result EQUAL 1)
++        message(STATUS "Python checking for ${desc} - \"import ${module}\" failed (is it installed?)")
++        set(${have_var} FALSE)
++    elseif(python_result EQUAL 2)
++        message(STATUS "Python checking for ${desc} - \"assert ${bool_expr}\" failed")
++        set(${have_var} FALSE)
+     else()
+         message(STATUS "Python checking for ${desc} - unknown error")
+-        set(${have} FALSE)
++        set(${have_var} FALSE)
+     endif()
+ endmacro(PYTHON_CHECK_MODULE)
+ 
++
++###############################################################################
++# Determine if a Python module is installed and if it meets a minimum required
++# version.
++#
++# - desc:
++#    Description of what's being checked (for user feedback)
++# - module:
++#    The module to be `import`ed
++# - module_version_expr:
++#    A Python expression to be evaluated that returns the module version string
++#    (usually "module_name.__version__", but may be tailored for non-conformant
++#    modules, or other custom use cases)
++# - min_module_version:
++#    The minimum version required of the module as a canonical Python version
++#    string ("major.minor.micro") as defined in PEP 440
++# - have_ver:
++#    The variable name to be set to TRUE if the module is present and meets
++#    the minimum version requirement or FALSE otherwise
++macro(PYTHON_CHECK_MODULE_VERSION desc module module_version_expr min_module_version have_var)
++    message(STATUS "")
++    message(STATUS "Python checking for ${desc}")
++    execute_process(
++        COMMAND ${PYTHON_EXECUTABLE} -c "
++#########################################
++try:
++    import ${module}
++except:
++    exit(1)
++try:
++    version = ${module_version_expr}
++    print(version)
++except:
++    exit(2)
++exit(0)
++#########################################"
++        RESULT_VARIABLE python_result
++        OUTPUT_VARIABLE version_output
++        OUTPUT_STRIP_TRAILING_WHITESPACE
++    )
++    if(python_result EQUAL 0)
++        if(${version_output} VERSION_GREATER_EQUAL ${min_module_version})
++            message(STATUS "Python checking for ${desc} - ${version_output} satisifes minimum required version ${min_module_version}")
++            set(${have_var} TRUE)
++        else()
++            message(STATUS "Python checking for ${desc} - ${version_output} does not satisfy minimum required version ${min_module_version}")
++            set(${have_var} FALSE)
++        endif()
++    elseif(python_result EQUAL 1)
++        message(STATUS "Python checking for ${desc} - \"import ${module}\" failed (is it installed?)")
++        set(${have_var} FALSE)
++    elseif(python_result EQUAL 2)
++        message(STATUS "Python checking for ${desc} - evaluation of \"${module_version_expr}\" failed")
++        set(${have_var} FALSE)
++    else()
++        message(STATUS "Python checking for ${desc} - unknown error")
++        set(${have_var} FALSE)
++    endif()
++endmacro(PYTHON_CHECK_MODULE_VERSION)
++
+ ###############################################################################
+ # Part 2: Python Libraries
+ ###############################################################################
+diff --git a/host/docs/build.dox.in b/host/docs/build.dox.in
+index 84c14181a..65f8bdbc2 100644
+--- a/host/docs/build.dox.in
++++ b/host/docs/build.dox.in
+@@ -64,7 +64,7 @@ The directory to which you extract libusb must not contain spaces. This is to sa
+ ### Python
+ 
+ - **Purpose:** Used by mako build time, and utility scripts and the Python API at runtime
+-- **Minimum Version:** 2.7
++- **Minimum Version:** 3.5
+ - **Usage:** build time + runtime utility scripts (required)
+ - **Download URL:** http://www.python.org/download/
+ - **Comments for Windows Users:**
+diff --git a/host/docs/pythonapi.dox b/host/docs/pythonapi.dox
+index c8f504049..8015034a5 100644
+--- a/host/docs/pythonapi.dox
++++ b/host/docs/pythonapi.dox
+@@ -16,14 +16,7 @@ using the binary installers provided on https://www.python.org/downloads/windows
+ If CMake can't find the Python headers or library, specify
+ the `PYTHON_INCLUDE_DIR` and/or `PYTHON_LIBRARY` CMake variables manually.
+ 
+-
+-\subsection python_install_2v3 Python 2 vs. 3
+-
+-The Python API supports both Python 2 and 3, but if you have both versions
+-installed, CMake might require some hints which version is the desired one.
+-To force a particular version, it helps to set `-DPYTHON_EXECUTABLE=/usr/bin/python3`,
+-or whatever interpreter you are expecting. The variables PYTHON_LIBRARY and
+-PYTHON_INCLUDE_DIR may also need to be set.
++Note that since UHD version 4.0.0.0, Python 2 is no longer supported.
+ 
+ \subsection python_install_windows Installing on Windows
+ 
+diff --git a/host/python/CMakeLists.txt b/host/python/CMakeLists.txt
+index dd9e2af87..4e2230ef9 100644
+--- a/host/python/CMakeLists.txt
++++ b/host/python/CMakeLists.txt
+@@ -10,7 +10,8 @@
+ 
+ PYTHON_CHECK_MODULE(
+     "virtualenv"
+-    "sys" "hasattr(sys, 'real_prefix')"
++    "sys"
++    "hasattr(sys, 'real_prefix')"
+     HAVE_PYTHON_VIRTUALENV
+ )
+ 
