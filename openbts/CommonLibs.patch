@@ -1,0 +1,44 @@
+diff --git a/Logger.h b/Logger.h
+index 7d98a00..9bc83d1 100644
+--- a/Logger.h
++++ b/Logger.h
+@@ -48,9 +48,13 @@
+ // If timestr decl is changed G++ will whine when Utils.h is included.
+ namespace Utils { const std::string timestr(); };
+ 
+-#if !defined(gettid)
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#ifndef HAVE_GETTID
+ # define gettid() syscall(SYS_gettid)
+-#endif // !defined(gettid)
++#endif // HAVE_GETTID
+ 
+ extern pid_t gPid;
+ #define _LOG(level) \
+diff --git a/Threads.cpp b/Threads.cpp
+index b20e158..fd9e6e3 100644
+--- a/Threads.cpp
++++ b/Threads.cpp
+@@ -33,14 +33,17 @@
+ #include "Logger.h"
+ #include <errno.h>
+ 
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
+ 
+ using namespace std;
+ 
+ int gMutexLogLevel = LOG_INFO;	// The mutexes cannot call gConfig or gGetLoggingLevel so we have to get the log level indirectly.
+ 
+-#if !defined(gettid)
++#ifndef HAVE_GETTID
+ # define gettid() syscall(SYS_gettid)
+-#endif // !defined(gettid)
++#endif // HAVE_GETTID
+ 
+ #define LOCKLOG(level,fmt,...) \
+ 	if (gMutexLogLevel >= LOG_##level) syslog(LOG_##level,"%lu %s %s:%u:%s:lockid=%p " fmt,gettid(),Utils::timestr().c_str(),__FILE__,__LINE__,__FUNCTION__,this,##__VA_ARGS__);

@@ -1,0 +1,42 @@
+diff --git a/a5.h b/a5.h
+index 47b85ab..01fd3e7 100644
+--- a/a5.h
++++ b/a5.h
+@@ -28,6 +28,10 @@
+ 
+ #include "bits.h"
+ 
++#ifdef __cplusplus
++extern "C" {
++#endif
++
+ /*! \defgroup a5 GSM A5 ciphering algorithm
+  *  @{
+  */
+@@ -63,4 +67,8 @@ void osmo_a5_4(const uint8_t *ck, uint32_t fn, ubit_t *dl, ubit_t *ul);
+ 
+ /*! @} */
+ 
++#ifdef __cplusplus
++}
++#endif
++
+ #endif /* __OSMO_A5_H__ */
+diff --git a/a53.h b/a53.h
+index 726d2ae..b2a7f98 100644
+--- a/a53.h
++++ b/a53.h
+@@ -1,5 +1,13 @@
++#ifdef __cplusplus
++extern "C" {
++#endif
++
+ typedef unsigned  char   u8;
+ typedef unsigned short  u16;
+ typedef unsigned   int  u32;
+ 
+ void A53_GSM( u8 *key, int klen, int count, u8 *block1, u8 *block2 );
++
++#ifdef __cplusplus
++}
++#endif

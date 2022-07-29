@@ -1,0 +1,48 @@
+diff --git a/configure.ac b/configure.ac
+index ccbb7c7..6943153 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -78,6 +78,8 @@ PKG_CHECK_MODULES(OSIP, libosip2)
+ AC_CHECK_FUNC(gethostbyname_r, [AC_DEFINE(HAVE_GETHOSTBYNAME_R, 1, Define if libc implements gethostbyname_r)])
+ AC_CHECK_FUNC(gethostbyname2_r, [AC_DEFINE(HAVE_GETHOSTBYNAME2_R, 1, Define if libc implements gethostbyname2_r)])
+ 
++AC_CHECK_FUNC(gettid, [AC_DEFINE(HAVE_GETTID, 1, Define if libc implements gettid)])
++
+ dnl Output files
+ AC_CONFIG_FILES([\
+     Makefile \
+diff --git a/smqueue/smcommands.cpp b/smqueue/smcommands.cpp
+index ef2a06a..e0f33f1 100644
+--- a/smqueue/smcommands.cpp
++++ b/smqueue/smcommands.cpp
+@@ -286,10 +286,10 @@ shortcode_register (const char *imsi, const char *msgtext,
+ 		case '+':
+ 			if (!seendig && !seenplus) {
+ 				*q++ = *p;
+-				seenplus++;
++				seenplus = true;
+ 			} else {
+ 				answer << "Error: + can only be the first character in a phone number";
+-				badnum++;
++				badnum = true;
+ 			}
+ 			break;
+ 		case ' ': case '(': case ')': case '\r': case '\n':
+@@ -299,7 +299,7 @@ shortcode_register (const char *imsi, const char *msgtext,
+ 			break;
+ 		default:
+ 			answer << "Error: invalid character '" << *p << "' in requested number";
+-			badnum++;
++			badnum = true;
+ 			break;
+ 		}
+ 	}
+@@ -312,7 +312,7 @@ shortcode_register (const char *imsi, const char *msgtext,
+ 			answer << phonenum << " not valid with " << seendig << " digits. "
+ 				<< "Must be " << gConfig.getStr("SC.Register.Digits.Min").c_str()
+ 				<< " to " << gConfig.getStr("SC.Register.Digits.Max").c_str() << " digits.";
+-			badnum++;
++			badnum = true;
+ 		}
+ 	}
+    }

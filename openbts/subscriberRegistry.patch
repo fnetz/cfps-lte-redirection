@@ -1,0 +1,14 @@
+diff --git a/configure.ac b/configure.ac
+index e8bed31..05517e4 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -75,6 +75,9 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <zmq.h>],
+ AC_CHECK_FUNC(gethostbyname_r, [AC_DEFINE(HAVE_GETHOSTBYNAME_R, 1, Define if libc implements gethostbyname_r)])
+ AC_CHECK_FUNC(gethostbyname2_r, [AC_DEFINE(HAVE_GETHOSTBYNAME2_R, 1, Define if libc implements gethostbyname2_r)])
+ 
++# Check for gettid
++AC_CHECK_FUNC(gettid, [AC_DEFINE(HAVE_GETTID, 1, Define if libc implements gettid)])
++
+ dnl Output files
+ AC_CONFIG_FILES([\
+     Makefile \
