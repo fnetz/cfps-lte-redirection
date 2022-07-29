@@ -1,0 +1,638 @@
+From 712fc649cd8d69246dc9c008f992cdd05504699d Mon Sep 17 00:00:00 2001
+From: Felix Solcher <11715763+fnetz@users.noreply.github.com>
+Date: Wed, 20 Jul 2022 20:56:53 +0200
+Subject: [PATCH] LibIIO support
+
+---
+ CMakeLists.txt                |  10 +
+ cmake/modules/FindIIO.cmake   |  31 +++
+ lib/src/phy/rf/CMakeLists.txt |  15 ++
+ lib/src/phy/rf/rf_dev.h       |  12 +
+ lib/src/phy/rf/rf_iio_imp.cc  | 464 ++++++++++++++++++++++++++++++++++
+ lib/src/phy/rf/rf_iio_imp.h   |  21 ++
+ 6 files changed, 553 insertions(+)
+ create mode 100644 cmake/modules/FindIIO.cmake
+ create mode 100644 lib/src/phy/rf/rf_iio_imp.cc
+ create mode 100644 lib/src/phy/rf/rf_iio_imp.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f526c1fdf..73358458a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -73,6 +73,7 @@ option(ENABLE_RF_PLUGINS     "Enable RF plugins"                        ON)
+ option(ENABLE_UHD            "Enable UHD"                               ON)
+ option(ENABLE_BLADERF        "Enable BladeRF"                           ON)
+ option(ENABLE_SOAPYSDR       "Enable SoapySDR"                          ON)
++option(ENABLE_IIO            "Enable IIO"                               ON)
+ option(ENABLE_SKIQ           "Enable Sidekiq SDK"                       ON)
+ option(ENABLE_ZEROMQ         "Enable ZeroMQ"                            ON)
+ option(ENABLE_HARDSIM        "Enable support for SIM cards"             ON)
+@@ -252,6 +253,15 @@ if(ENABLE_SOAPYSDR)
+   endif(SOAPYSDR_FOUND)
+ endif(ENABLE_SOAPYSDR)
+ 
++# IIO
++if(ENABLE_IIO)
++  find_package(IIO)
++  if(IIO_FOUND)
++    include_directories(${IIO_INCLUDE_DIRS})
++    link_directories(${IIO_LIBRARY_DIRS})
++  endif(IIO_FOUND)
++endif(ENABLE_IIO)
++
+ # ZeroMQ
+ if(ENABLE_ZEROMQ)
+   find_package(ZeroMQ)
+diff --git a/cmake/modules/FindIIO.cmake b/cmake/modules/FindIIO.cmake
+new file mode 100644
+index 000000000..4a0e9e5f1
+--- /dev/null
++++ b/cmake/modules/FindIIO.cmake
+@@ -0,0 +1,31 @@
++message(STATUS "FINDING IIO.")
++if (NOT IIO_FOUND)
++  pkg_check_modules(IIO_PKG libiio)
++
++  find_path(IIO_INCLUDE_DIRS
++    NAMES iio.h
++    HINTS $ENV{IIO_DIR}/include
++    PATHS ${IIO_PKG_INCLUDE_DIRS}
++          /usr/include
++          /usr/local/include
++  )
++
++  find_library(IIO_LIBRARIES
++    NAMES iio libiio
++    HINTS $ENV{IIO_DIR}/lib
++    PATHS ${IIO_PKG_LIBRARY_DIRS}
++          /usr/lib
++          /usr/local/lib
++          /usr/lib/arm-linux-gnueabihf     
++  )
++
++  if(IIO_INCLUDE_DIRS AND IIO_LIBRARIES)
++    set(IIO_FOUND TRUE CACHE INTERNAL "libiio found")
++    message(STATUS "Found libiio: ${IIO_INCLUDE_DIRS}, ${IIO_LIBRARIES}")
++  else(IIO_INCLUDE_DIRS AND IIO_LIBRARIES)
++    set(IIO_FOUND FALSE CACHE INTERNAL "libiio found")
++    message(STATUS "libiio not found.")
++  endif(IIO_INCLUDE_DIRS AND IIO_LIBRARIES)
++
++  mark_as_advanced(IIO_LIBRARIES IIO_INCLUDE_DIRS)
++endif (NOT IIO_FOUND)
+diff --git a/lib/src/phy/rf/CMakeLists.txt b/lib/src/phy/rf/CMakeLists.txt
+index 71b5b54cb..85e638952 100644
+--- a/lib/src/phy/rf/CMakeLists.txt
++++ b/lib/src/phy/rf/CMakeLists.txt
+@@ -92,6 +92,21 @@ if(RF_FOUND)
+     install(TARGETS srsran_rf_soapy DESTINATION ${LIBRARY_DIR} OPTIONAL)
+   endif (SOAPYSDR_FOUND AND ENABLE_SOAPYSDR)
+ 
++  if (IIO_FOUND AND ENABLE_IIO)
++    add_definitions(-DENABLE_IIO)
++    set(SOURCES_IIO rf_iio_imp.cc)
++    if (ENABLE_RF_PLUGINS)
++      add_library(srsran_rf_iio SHARED ${SOURCES_IIO})
++      set_target_properties(srsran_rf_iio PROPERTIES VERSION ${SRSRAN_VERSION_STRING} SOVERSION ${SRSRAN_SOVERSION})
++      list(APPEND DYNAMIC_PLUGINS srsran_rf_iio)
++    else (ENABLE_RF_PLUGINS)
++      add_library(srsran_rf_iio STATIC ${SOURCES_IIO})
++      list(APPEND STATIC_PLUGINS srsran_rf_iio)
++    endif (ENABLE_RF_PLUGINS)
++    target_link_libraries(srsran_rf_iio srsran_rf_utils srsran_phy ${IIO_LIBRARIES} ad9361) # TODO find script
++    install(TARGETS srsran_rf_iio DESTINATION ${LIBRARY_DIR} OPTIONAL)
++  endif (IIO_FOUND AND ENABLE_IIO)
++
+   if(SKIQ_FOUND AND ENABLE_SKIQ)
+     add_executable(skiq_pps_test skiq_pps_test.c)
+     target_link_libraries(skiq_pps_test ${SKIQ_LIBRARIES} rt pthread m)
+diff --git a/lib/src/phy/rf/rf_dev.h b/lib/src/phy/rf/rf_dev.h
+index 705b928c6..822878fe9 100644
+--- a/lib/src/phy/rf/rf_dev.h
++++ b/lib/src/phy/rf/rf_dev.h
+@@ -52,6 +52,15 @@ static srsran_rf_plugin_t plugin_soapy = {"", NULL, &srsran_rf_dev_soapy};
+ #endif
+ #endif
+ 
++#ifdef ENABLE_IIO
++#ifdef ENABLE_RF_PLUGINS
++static srsran_rf_plugin_t plugin_iio = {"libsrsran_rf_iio.so", NULL, NULL};
++#else
++#include "rf_iio_imp.h"
++static srsran_rf_plugin_t plugin_iio = {"", NULL, &srsran_rf_dev_iio};
++#endif
++#endif
++
+ /* Define implementation for ZeroMQ */
+ #ifdef ENABLE_ZEROMQ
+ #ifdef ENABLE_RF_PLUGINS
+@@ -105,6 +114,9 @@ static srsran_rf_plugin_t* rf_plugins[] = {
+ #ifdef ENABLE_SOAPYSDR
+     &plugin_soapy,
+ #endif
++#ifdef ENABLE_IIO
++    &plugin_iio,
++#endif
+ #ifdef ENABLE_BLADERF
+     &plugin_blade,
+ #endif
+diff --git a/lib/src/phy/rf/rf_iio_imp.cc b/lib/src/phy/rf/rf_iio_imp.cc
+new file mode 100644
+index 000000000..3326ac6e4
+--- /dev/null
++++ b/lib/src/phy/rf/rf_iio_imp.cc
+@@ -0,0 +1,464 @@
++#include "rf_iio_imp.h"
++#include "rf_helper.h"
++#include "rf_plugin.h"
++#include "srsran/phy/utils/debug.h"
++
++#include <ad9361.h>
++#include <iio.h>
++
++#include <array>
++#include <memory>
++#include <mutex>
++#include <utility>
++
++#define HAS_LIBAD9361 1
++
++// TODO set in cmake (SoapyPlutoSDR)
++#ifdef HAS_LIBAD9361
++static const int FIR = 4;
++#else
++static const int FIR = 1;
++#endif
++
++struct rf_iio_handler {
++  iio_context* ctx{nullptr};
++  iio_device * phy_dev{nullptr}, *tx_dev{nullptr}, *rx_dev{nullptr};
++
++  // TODO is this needed?
++  std::mutex tx_dev_mutex, rx_dev_mutex;
++
++  srsran_rf_info_t info{};
++
++  srsran_rf_error_handler_t error_handler{nullptr};
++  void*                     error_handler_arg{nullptr};
++
++  rf_iio_handler(iio_context* ctx_, iio_device* phy_dev_, iio_device* tx_dev_, iio_device* rx_dev_) :
++    ctx(ctx_), phy_dev(phy_dev_), tx_dev(tx_dev_), rx_dev(rx_dev_)
++  {
++    // Constant gain ranges
++    // TODO is there a way to get this from the device?
++    info.min_rx_gain = 0.0F;
++    info.max_rx_gain = 73.0F;
++    info.min_tx_gain = 0.0F;
++    info.max_tx_gain = 89.0F;
++  }
++
++  ~rf_iio_handler()
++  {
++    if (ctx != nullptr) {
++      iio_context_destroy(ctx);
++    }
++  }
++
++  rf_iio_handler(const rf_iio_handler&)            = delete;
++  rf_iio_handler& operator=(const rf_iio_handler&) = delete;
++
++  rf_iio_handler(rf_iio_handler&&)            = delete;
++  rf_iio_handler& operator=(rf_iio_handler&&) = delete;
++
++  static int open(char* args, void** handler) { return open_multi(args, handler, 1); }
++
++  static int open_multi(char* args, void** handler, uint32_t number_of_channels)
++  {
++    if (handler == nullptr) {
++      return SRSRAN_ERROR_INVALID_INPUTS;
++    }
++
++    if (number_of_channels > SRSRAN_MAX_CHANNELS) {
++      ERROR("Error opening IIO: maximum number of channels exceeded (%d>%d)", number_of_channels, SRSRAN_MAX_CHANNELS);
++      return SRSRAN_ERROR;
++    }
++
++    struct iio_scan_context* scan_ctx = iio_create_scan_context(nullptr, 0);
++    if (scan_ctx == nullptr) {
++      char buf[256];
++      iio_strerror(errno, buf, sizeof(buf));
++      ERROR("Error creating IIO scan context: %s", buf);
++      return SRSRAN_ERROR;
++    }
++
++    struct iio_context_info** info            = nullptr;
++    ssize_t                   num_info_or_err = iio_scan_context_get_info_list(scan_ctx, &info);
++    if (num_info_or_err < 0) {
++      iio_scan_context_destroy(scan_ctx);
++
++      char buf[256];
++      iio_strerror(-num_info_or_err, buf, sizeof(buf));
++      ERROR("Error scanning for IIO contexts: %s", buf);
++      return SRSRAN_ERROR;
++    }
++    if (num_info_or_err == 0) {
++      ERROR("IIO did not find any contexts");
++      return SRSRAN_ERROR;
++    }
++    size_t num_info = (size_t)num_info_or_err;
++
++    for (size_t i = 0; i < num_info; i++) {
++      struct iio_context_info* info_i      = info[i];
++      const char*              description = iio_context_info_get_description(info_i);
++      printf("Found IIO context: %s\n", description);
++    }
++
++    const char* uri = iio_context_info_get_uri(info[0]);
++
++    // TODO device selection
++    printf("Using first context with URL %s\n", uri);
++
++    struct iio_context* ctx = iio_create_context_from_uri(uri);
++
++    iio_context_info_list_free(info);
++    iio_scan_context_destroy(scan_ctx);
++
++    if (ctx == nullptr) {
++      char buf[256];
++      iio_strerror(errno, buf, sizeof(buf));
++      ERROR("Error creating IIO context: %s", buf);
++      return SRSRAN_ERROR;
++    }
++
++    struct iio_device* dev    = iio_context_find_device(ctx, "ad9361-phy");
++    struct iio_device* rx_dev = iio_context_find_device(ctx, "cf-ad9361-lpc");
++    struct iio_device* tx_dev = iio_context_find_device(ctx, "cf-ad9361-dds-core-lpc");
++
++    if (dev == nullptr || rx_dev == nullptr || tx_dev == nullptr) {
++      iio_context_destroy(ctx);
++
++      ERROR("IIO context does not satisfy requirements (missing devices)");
++      return SRSRAN_ERROR;
++    }
++
++    auto iio_handler = std::make_unique<rf_iio_handler>(ctx, dev, tx_dev, rx_dev);
++    *handler         = iio_handler.release();
++    return SRSRAN_SUCCESS;
++  }
++
++  static int close(void* h)
++  {
++    if (h != nullptr) {
++      std::unique_ptr<rf_iio_handler> handler(static_cast<rf_iio_handler*>(h));
++      // handler gets deleted here
++    }
++    return SRSRAN_SUCCESS;
++  }
++
++  const char* devname() const
++  {
++    // TODO better name function?
++    return iio_context_get_name(ctx);
++  }
++
++  srsran_rf_info_t* get_info() { return &info; }
++
++  int start_rx_stream(bool now) { return -1; }
++
++  int stop_rx_stream() { return -1; }
++
++  void flush_buffer() {}
++
++  bool has_rssi()
++  {
++    // TODO read channel rssi
++    return false;
++  }
++  float get_rssi() { return NAN; }
++
++  void suppress_stdout() {}
++
++  void register_error_handler(srsran_rf_error_handler_t handler, void* arg)
++  {
++    error_handler     = handler;
++    error_handler_arg = arg;
++  }
++
++  static void set_ad9361_sample_rate(struct iio_device* dev, double freq)
++  {
++    // Setting the sample rate via the libad9361 API should set up appropriate filters.
++#ifdef HAS_LIBAD9361
++    if (ad9361_set_bb_rate(dev, (unsigned long)freq) != 0) {
++      ERROR("Unable to set AD9361 BB rate.");
++    }
++#endif
++  }
++
++  double set_rx_srate(double freq)
++  {
++    {
++      std::lock_guard<std::mutex> lock(rx_dev_mutex);
++
++      bool decimation = false;
++      if (freq < (25e6 / (12 * FIR))) {
++        if (freq * 8 < (25e6 / 48)) {
++          ERROR("Sample rate is not supported.");
++        } else if (freq * 8 < (25e6 / 12)) {
++          printf("Requested sample rate needs a FIR setting loaded.\n");
++        }
++
++        decimation = true;
++        freq       = freq * 8;
++      }
++
++      iio_channel_attr_write_longlong(
++          iio_device_find_channel(phy_dev, "voltage0", false), "sampling_frequency", (long long)freq);
++
++      iio_channel_attr_write_longlong(iio_device_find_channel(rx_dev, "voltage0", false),
++                                      "sampling_frequency",
++                                      (long long)(decimation ? (freq / 8) : freq));
++    }
++
++    set_ad9361_sample_rate(phy_dev, freq);
++
++    return get_rx_srate();
++  }
++
++  double get_rx_srate()
++  {
++    std::lock_guard<std::mutex> lock(rx_dev_mutex);
++    long long                   sample_rate = -1;
++    if (iio_channel_attr_read_longlong(
++            iio_device_find_channel(rx_dev, "voltage0", false), "sampling_frequency", &sample_rate) != 0) {
++      ERROR("Error reading RX sample rate");
++      return -1;
++    }
++    return static_cast<double>(sample_rate);
++  }
++
++  double set_tx_srate(double freq)
++  {
++    bool interpolation = false;
++    if (freq < (25e6 / (12 * FIR))) {
++      if (freq * 8 < (25e6 / 48)) {
++        ERROR("Sample rate is not supported.");
++      } else if (freq * 8 < (25e6 / 12)) {
++        printf("Requested sample rate needs a FIR setting loaded.\n");
++      }
++
++      interpolation = true;
++      freq          = freq * 8;
++    }
++
++    iio_channel_attr_write_longlong(
++        iio_device_find_channel(phy_dev, "voltage0", true), "sampling_frequency", (long long)freq);
++    iio_channel_attr_write_longlong(iio_device_find_channel(tx_dev, "voltage0", true),
++                                    "sampling_frequency",
++                                    (long long)(interpolation ? freq / 8 : freq));
++
++    set_ad9361_sample_rate(phy_dev, freq);
++
++    return get_tx_srate();
++  }
++
++  double get_tx_srate()
++  {
++    std::lock_guard<std::mutex> lock(tx_dev_mutex);
++    long long                   sample_rate = -1;
++    if (iio_channel_attr_read_longlong(
++            iio_device_find_channel(tx_dev, "voltage0", true), "sampling_frequency", &sample_rate) != 0) {
++      ERROR("Error reading TX sample rate");
++      return -1;
++    }
++    return static_cast<double>(sample_rate);
++  }
++
++  int set_rx_gain(double gain)
++  {
++    std::lock_guard<std::mutex> lock(rx_dev_mutex);
++    iio_channel_attr_write_longlong(
++        iio_device_find_channel(phy_dev, "voltage0", false), "hardwaregain", (long long)gain);
++    return SRSRAN_SUCCESS;
++  }
++
++  int set_rx_gain_ch(uint32_t ch, double gain)
++  {
++    // TODO support multi-channel
++    (void)ch;
++    return set_rx_gain(gain);
++  }
++
++  int set_tx_gain(double gain)
++  {
++    std::lock_guard<std::mutex> lock(rx_dev_mutex);
++    iio_channel_attr_write_longlong(
++        iio_device_find_channel(phy_dev, "voltage0", true), "hardwaregain", (long long)(gain - 89));
++    return SRSRAN_SUCCESS;
++  }
++
++  int set_tx_gain_ch(uint32_t ch, double gain)
++  {
++    // TODO support multi-channel
++    (void)ch;
++    return set_tx_gain(gain);
++  }
++
++  double get_rx_gain()
++  {
++    std::lock_guard<std::mutex> lock(rx_dev_mutex);
++    long long                   gain = 0;
++    if (iio_channel_attr_read_longlong(iio_device_find_channel(phy_dev, "voltage0", false), "hardwaregain", &gain) !=
++        0) {
++      return SRSRAN_ERROR;
++    }
++    return static_cast<double>(gain);
++  }
++
++  double get_tx_gain()
++  {
++    std::lock_guard<std::mutex> lock(rx_dev_mutex);
++    long long                   gain = 0;
++    if (iio_channel_attr_read_longlong(iio_device_find_channel(phy_dev, "voltage0", true), "hardwaregain", &gain) !=
++        0) {
++      return SRSRAN_ERROR;
++    }
++    return static_cast<double>(gain + 89);
++  }
++
++  double get_rx_freq()
++  {
++    std::lock_guard<std::mutex> lock(rx_dev_mutex);
++    long long                   freq = 0;
++    if (iio_channel_attr_read_longlong(iio_device_find_channel(phy_dev, "altvoltage0", true), "frequency", &freq) !=
++        0) {
++      return SRSRAN_ERROR;
++    }
++    return static_cast<double>(freq);
++  }
++
++  double set_rx_freq(uint32_t ch, double freq)
++  {
++    std::lock_guard<std::mutex> lock(rx_dev_mutex);
++    iio_channel_attr_write_longlong(
++        iio_device_find_channel(phy_dev, "altvoltage0", true), "frequency", (long long)freq);
++    return get_rx_freq();
++  }
++
++  double get_tx_freq()
++  {
++    std::lock_guard<std::mutex> lock(rx_dev_mutex);
++    long long                   freq = 0;
++    if (iio_channel_attr_read_longlong(iio_device_find_channel(phy_dev, "altvoltage1", true), "frequency", &freq) !=
++        0) {
++      return SRSRAN_ERROR;
++    }
++    return static_cast<double>(freq);
++  }
++
++  double set_tx_freq(uint32_t ch, double freq)
++  {
++    std::lock_guard<std::mutex> lock(rx_dev_mutex);
++    iio_channel_attr_write_longlong(
++        iio_device_find_channel(phy_dev, "altvoltage1", true), "frequency", (long long)freq);
++    return get_tx_freq();
++  }
++
++  void get_time(time_t* secs, double* frac_secs)
++  {
++    printf("Todo: implement rf_soapy_get_time()\n");
++  }
++
++  int recv_with_time(void* data, uint32_t nsamples, bool blocking, time_t* secs, double* frac_secs)
++  {
++    std::array<void*, SRSRAN_MAX_PORTS> data_multi{};
++    data_multi[0] = data;
++    return recv_with_time_multi(data_multi.data(), nsamples, blocking, secs, frac_secs);
++  }
++
++  int recv_with_time_multi(void** data, uint32_t nsamples, bool blocking, time_t* secs, double* frac_secs)
++  {
++    return -1;
++  }
++
++  int send_timed(void*  data,
++                 int    nsamples,
++                 time_t secs,
++                 double frac_secs,
++                 bool   has_time_spec,
++                 bool   blocking,
++                 bool   is_start_of_burst,
++                 bool   is_end_of_burst)
++  {
++    std::array<void*, SRSRAN_MAX_PORTS> data_multi{};
++    data_multi[0] = data;
++    return send_timed_multi(
++        data_multi.data(), nsamples, secs, frac_secs, has_time_spec, blocking, is_start_of_burst, is_end_of_burst);
++  }
++
++  int send_timed_multi(void** data,
++                       int    nsamples,
++                       time_t secs,
++                       double frac_secs,
++                       bool   has_time_spec,
++                       bool   blocking,
++                       bool   is_start_of_burst,
++                       bool   is_end_of_burst)
++  {
++    return -1;
++  }
++};
++
++using Handler = rf_iio_handler;
++
++// https://stackoverflow.com/questions/9779105/generic-member-function-pointer-as-a-template-parameter
++template <typename T, T>
++struct fwd;
++
++template <typename R, typename... Args, R (Handler::*mf)(Args...)>
++struct fwd<R (Handler::*)(Args...), mf> {
++  static inline R call(void* handler, Args... args)
++  {
++    auto* iio_handler = static_cast<Handler*>(handler);
++    return (iio_handler->*mf)(std::forward<Args>(args)...);
++  }
++};
++
++template <typename R, typename... Args, R (Handler::*mf)(Args...) const>
++struct fwd<R (Handler::*)(Args...) const, mf> {
++  static inline R call(void* handler, Args... args)
++  {
++    const auto* iio_handler = static_cast<const Handler*>(handler);
++    return (iio_handler->*mf)(std::forward<Args>(args)...);
++  }
++};
++
++#define hfwd(name) fwd<decltype(&Handler::name), &Handler::name>::call
++
++rf_dev_t srsran_rf_dev_iio = {
++    "iio",
++    hfwd(devname),
++    hfwd(start_rx_stream),
++    hfwd(stop_rx_stream),
++    hfwd(flush_buffer),
++    hfwd(has_rssi),
++    hfwd(get_rssi),
++    hfwd(suppress_stdout),
++    hfwd(register_error_handler),
++    Handler::open,
++    Handler::open_multi,
++    Handler::close,
++    hfwd(set_rx_srate),
++    hfwd(set_rx_gain),
++    hfwd(set_rx_gain_ch),
++    hfwd(set_tx_gain),
++    hfwd(set_tx_gain_ch),
++    hfwd(get_rx_gain),
++    hfwd(get_tx_gain),
++    hfwd(get_info),
++    hfwd(set_rx_freq),
++    hfwd(set_tx_srate),
++    hfwd(set_tx_freq),
++    hfwd(get_time),
++    nullptr, // sync_pps
++    hfwd(recv_with_time),
++    hfwd(recv_with_time_multi),
++    hfwd(send_timed),
++    hfwd(send_timed_multi),
++};
++
++#ifdef ENABLE_RF_PLUGINS
++int register_plugin(rf_dev_t** rf_api)
++{
++  if (rf_api == NULL) {
++    return SRSRAN_ERROR;
++  }
++  *rf_api = &srsran_rf_dev_iio;
++  return SRSRAN_SUCCESS;
++}
++#endif /* ENABLE_RF_PLUGINS */
+diff --git a/lib/src/phy/rf/rf_iio_imp.h b/lib/src/phy/rf/rf_iio_imp.h
+new file mode 100644
+index 000000000..79b262cd5
+--- /dev/null
++++ b/lib/src/phy/rf/rf_iio_imp.h
+@@ -0,0 +1,21 @@
++#ifndef SRSRAN_RF_IIO_IMP_H_
++#define SRSRAN_RF_IIO_IMP_H_
++
++#include "srsran/config.h"
++#include "srsran/phy/common/phy_common.h"
++#include "srsran/phy/rf/rf.h"
++#include <stdbool.h>
++#include <stdint.h>
++#define DEVNAME_IIO "iio"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++extern rf_dev_t srsran_rf_dev_iio;
++
++#ifdef __cplusplus
++} // extern "C"
++#endif
++
++#endif
+-- 
+2.37.1
+
